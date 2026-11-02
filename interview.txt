@@ -1,0 +1,12 @@
+Smart Complaint Management System
+
+• Developed using MERN Stack
+• Implemented complaint voting system
+• Integrated location-based issue tracking
+• Added image upload using Multer
+• Designed admin dashboard for complaint management
+• Built complaint status tracking and priority management
+
+
+
+"Mera project Smart Digital Complaint Management System hai. Isme user registration aur login kar sakta hai, complaint raise kar sakta hai aur uska status track kar sakta hai. Admin dashboard se complaints ko manage aur update kiya ja sakta hai. Maine frontend ke liye HTML, CSS, JavaScript aur backend ke liye Node.js, Express.js aur MongoDB use kiya hai. Is project se maine CRUD operations, authentication, routing aur database management sikha.

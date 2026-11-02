@@ -1,0 +1,245 @@
+{
+  "info": {
+    "_postman_id": "e81037f7-8c78-4d98-bb9b-e84529175bf7",
+    "name": "Smart Complaint Portal API",
+    "description": "Local REST and cookie-authenticated workflow for the Complaint Portal. Set apiUrl to http://127.0.0.1:5000/api. Postman stores the HTTP-only session cookie in its cookie jar.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "apiUrl", "value": "http://127.0.0.1:5000/api" },
+    { "key": "citizenEmail", "value": "asha@example.com" },
+    { "key": "adminEmail", "value": "staff@example.com" },
+    { "key": "password", "value": "Change-this-local-password" },
+    { "key": "complaintId", "value": "" },
+    { "key": "residentId", "value": "" },
+    { "key": "communityComplaintId", "value": "Set the ID of another resident's report" },
+    { "key": "resetToken", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Readiness",
+          "request": { "method": "GET", "url": "{{apiUrl}}/health/ready" }
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register citizen",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Asha Sharma\",\n  \"email\": \"{{citizenEmail}}\",\n  \"mobile\": \"9876543210\",\n  \"address\": \"Ward 4\",\n  \"password\": \"{{password}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiUrl}}/auth/register"
+          }
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{citizenEmail}}\",\n  \"password\": \"{{password}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Admin login (separate admin authentication)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{password}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiUrl}}/admin/login"
+          }
+        },
+        {
+          "name": "Current profile",
+          "request": { "method": "GET", "url": "{{apiUrl}}/auth/me" }
+        },
+        {
+          "name": "Change password",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"currentPassword\": \"{{password}}\",\n  \"newPassword\": \"A-new-private-password\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiUrl}}/auth/me/password"
+          }
+        },
+        {
+          "name": "Forgot password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{citizenEmail}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiUrl}}/auth/forgot-password"
+          }
+        },
+        {
+          "name": "Reset password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"password\": \"A-new-private-password\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiUrl}}/auth/reset-password"
+          }
+        },
+        {
+          "name": "Logout",
+          "request": { "method": "POST", "url": "{{apiUrl}}/auth/logout" }
+        }
+      ]
+    },
+    {
+      "name": "Complaints",
+      "item": [
+        {
+          "name": "My dashboard summary",
+          "request": { "method": "GET", "url": "{{apiUrl}}/complaints/overview" }
+        },
+        {
+          "name": "Create report",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "title", "value": "Pothole near the park", "type": "text" },
+                { "key": "category", "value": "Road Damage", "type": "text" },
+                { "key": "priority", "value": "High", "type": "text" },
+                { "key": "location", "value": "Ward 4", "type": "text" },
+                { "key": "description", "value": "Large pothole near the pedestrian crossing.", "type": "text" }
+              ]
+            },
+            "url": "{{apiUrl}}/complaints"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const body = pm.response.json();",
+                  "  pm.collectionVariables.set('complaintId', body.complaint._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "My complaints",
+          "request": { "method": "GET", "url": "{{apiUrl}}/complaints/mine" }
+        },
+        {
+          "name": "Community reports",
+          "request": { "method": "GET", "url": "{{apiUrl}}/complaints/community" }
+        },
+        {
+          "name": "Support a community report",
+          "request": { "method": "POST", "url": "{{apiUrl}}/complaints/{{communityComplaintId}}/vote" }
+        },
+        {
+          "name": "My notifications",
+          "request": { "method": "GET", "url": "{{apiUrl}}/notifications" }
+        }
+      ]
+    },
+    {
+      "name": "Admin (sign in with promoted staff account)",
+      "item": [
+        {
+          "name": "Admin dashboard",
+          "request": { "method": "GET", "url": "{{apiUrl}}/admin/dashboard" }
+        },
+        {
+          "name": "Dashboard analytics",
+          "request": { "method": "GET", "url": "{{apiUrl}}/admin/overview" }
+        },
+        {
+          "name": "Search complaints",
+          "request": { "method": "GET", "url": "{{apiUrl}}/admin/complaints?search=road" }
+        },
+        {
+          "name": "Complaint case details and history",
+          "request": { "method": "GET", "url": "{{apiUrl}}/admin/complaints/{{complaintId}}" }
+        },
+        {
+          "name": "Complaint audit history page",
+          "request": { "method": "GET", "url": "{{apiUrl}}/admin/complaints/{{complaintId}}/history?page=1" }
+        },
+        {
+          "name": "Search residents",
+          "request": { "method": "GET", "url": "{{apiUrl}}/admin/users?search=asha" }
+        },
+        {
+          "name": "Resident profile and complaints",
+          "request": { "method": "GET", "url": "{{apiUrl}}/admin/users/{{residentId}}" }
+        },
+        {
+          "name": "Move complaint to in review",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"In Review\",\n  \"priority\": \"High\",\n  \"department\": \"Road Department\",\n  \"adminResponse\": \"We have reviewed your report and assigned it for action.\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiUrl}}/admin/complaints/{{complaintId}}/status"
+          }
+        },
+        {
+          "name": "Move complaint to in progress",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"In Progress\",\n  \"adminResponse\": \"The assigned department has started work.\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiUrl}}/admin/complaints/{{complaintId}}/status"
+          }
+        },
+        {
+          "name": "Resolve complaint after work",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"Resolved\",\n  \"adminResponse\": \"The repair team has completed the work.\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiUrl}}/admin/complaints/{{complaintId}}/status"
+          }
+        },
+        {
+          "name": "Assign complaint department",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"department\": \"Road Department\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiUrl}}/admin/complaints/{{complaintId}}/assignment"
+          }
+        },
+        {
+          "name": "Suspend resident account",
+          "request": { "method": "PUT", "url": "{{apiUrl}}/admin/users/{{residentId}}/suspend" }
+        },
+        {
+          "name": "Activate resident account",
+          "request": { "method": "PUT", "url": "{{apiUrl}}/admin/users/{{residentId}}/activate" }
+        },
+        {
+          "name": "Soft-delete resident account",
+          "request": { "method": "DELETE", "url": "{{apiUrl}}/admin/users/{{residentId}}" }
+        },
+        {
+          "name": "Archive complaint (soft delete)",
+          "request": { "method": "DELETE", "url": "{{apiUrl}}/admin/complaints/{{complaintId}}" }
+        },
+        {
+          "name": "Archived complaints",
+          "request": { "method": "GET", "url": "{{apiUrl}}/admin/complaints?includeDeleted=true" }
+        },
+        {
+          "name": "Deactivate admin session",
+          "request": { "method": "POST", "url": "{{apiUrl}}/admin/logout" }
+        }
+      ]
+    }
+  ]
+}
