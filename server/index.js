@@ -7,7 +7,9 @@ const connectDB = require("./src/config/db");
 const port = Number(process.env.PORT || 5000);
 
 if (!process.env.MONGO_URI) {
-  throw new Error("MONGO_URI is required. Copy .env.example to .env and configure it.");
+  throw new Error(
+    "MONGO_URI is required. Copy .env.example to .env and configure it.",
+  );
 }
 
 if (
@@ -15,7 +17,9 @@ if (
   process.env.JWT_SECRET.length < 32 ||
   process.env.JWT_SECRET.startsWith("replace-")
 ) {
-  throw new Error("JWT_SECRET must be a private random value with at least 32 characters.");
+  throw new Error(
+    "JWT_SECRET must be a private random value with at least 32 characters.",
+  );
 }
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -24,7 +28,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 
 async function start() {
   await connectDB();
-  const server = app.listen(port, () => {
+  const server = app.listen(port, "0.0.0.0", () => {
     console.info(`API server listening on port ${port}`);
   });
 
@@ -45,12 +49,16 @@ async function start() {
         console.error("Could not close the API server cleanly:", error.message);
         process.exitCode = 1;
       }
-      mongoose.disconnect()
+      mongoose
+        .disconnect()
         .then(() => {
           clearTimeout(forceExit);
         })
         .catch((disconnectError) => {
-          console.error("Could not close the MongoDB connection cleanly:", disconnectError.message);
+          console.error(
+            "Could not close the MongoDB connection cleanly:",
+            disconnectError.message,
+          );
           process.exitCode = 1;
         });
     });
