@@ -1,8 +1,25 @@
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
+const fs = require("fs");
 const jwt = require("jsonwebtoken");
+const path = require("path");
+const Complaint = require("../models/Complaint");
+const ComplaintHistory = require("../models/ComplaintHistory");
+const ComplaintVote = require("../models/ComplaintVote");
+const Notification = require("../models/Notification");
+const RegistrationOtp = require("../models/RegistrationOtp");
 const User = require("../models/User");
 const { sendEmail } = require("../utils/email");
+const { emitUserEvent } = require("../utils/complaintEvents");
+const {
+  generateRegistrationOtp,
+  hashRegistrationOtp,
+  matchesRegistrationOtp,
+} = require("../utils/registrationOtp");
+
+const registrationOtpLifetimeMs = 10 * 60 * 1000;
+const pendingRegistrationLifetimeMs = 24 * 60 * 60 * 1000;
+const registrationOtpMaxAttempts = 5;
 
 // const cookieOptions = {
 //   httpOnly: true,
@@ -45,6 +62,19 @@ function sendPasswordResetEmail(user, resetUrl) {
     subject: "Reset your Complaint Portal password",
     text: `Hello ${user.name},\n\nUse this link to reset your password within 30 minutes:\n${resetUrl}\n\nIf you did not request this, you can ignore this email.`,
   });
+}
+
+async function sendRegistrationOtp(email, otp) {
+  try {
+    return await sendEmail({
+      to: email,
+      subject: "Verify your Complaint Portal email",
+      text: `Your Smart Digital Complaint Portal verification code is ${otp}.\n\nThis code expires in 10 minutes. If you did not start registration, you can ignore this email.`,
+    });
+  } catch (error) {
+    console.error("Could not send registration verification email:", error.message);
+    return false;
+  }
 }
 
 async function register(request, response, next) {
@@ -91,14 +121,118 @@ async function register(request, response, next) {
         .json({ message: "An account with this email already exists." });
     }
 
+    if (!process.env.SMTP_HOST || !process.env.SMTP_FROM) {
+      return response
+        .status(503)
+        .json({ message: "Email verification is not configured. Set SMTP_HOST and SMTP_FROM in server/.env, then restart the API." });
+    }
+
     const passwordHash = await bcrypt.hash(password, 12);
-    const user = await User.create({
-      name: name.trim(),
-      email: normalizedEmail,
-      mobile,
-      address: address.trim(),
-      passwordHash,
+    const otp = generateRegistrationOtp();
+    const now = Date.now();
+    await RegistrationOtp.findOneAndUpdate(
+      { email: normalizedEmail },
+      {
+        $set: {
+          name: name.trim(),
+          email: normalizedEmail,
+          mobile,
+          address: address.trim(),
+          passwordHash,
+          otpHash: hashRegistrationOtp(normalizedEmail, otp),
+          otpExpiresAt: new Date(now + registrationOtpLifetimeMs),
+          cleanupAt: new Date(now + pendingRegistrationLifetimeMs),
+          attempts: 0,
+        },
+      },
+      { upsert: true, new: true, runValidators: true },
+    );
+
+    if (!(await sendRegistrationOtp(normalizedEmail, otp))) {
+      return response
+        .status(503)
+        .json({ message: "Could not send the verification email. Check the SMTP host, sender address, and provider credentials in server/.env." });
+    }
+
+    response.status(202).json({
+      message: `Enter the six-digit code sent to ${normalizedEmail}.`,
     });
+  } catch (error) {
+    if (error.code === 11000) {
+      return response
+        .status(409)
+        .json({ message: "An account with this email already exists." });
+    }
+    if (error.name === "ValidationError") {
+      return response
+        .status(400)
+        .json({ message: "Check your account details and try again." });
+    }
+    next(error);
+  }
+}
+
+async function verifyRegistrationEmail(request, response, next) {
+  try {
+    const { email, otp } = request.body || {};
+    if (
+      typeof email !== "string" ||
+      typeof otp !== "string" ||
+      !/^\S+@\S+\.\S+$/.test(email.trim()) ||
+      email.trim().length > 254 ||
+      !/^\d{6}$/.test(otp)
+    ) {
+      return response
+        .status(400)
+        .json({ message: "Enter the email address and six-digit verification code." });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const now = new Date();
+    const pendingRegistration = await RegistrationOtp.findOne({
+      email: normalizedEmail,
+      cleanupAt: { $gt: now },
+      otpExpiresAt: { $gt: now },
+      attempts: { $lt: registrationOtpMaxAttempts },
+    }).select("+passwordHash +otpHash");
+
+    if (
+      !pendingRegistration ||
+      !matchesRegistrationOtp(normalizedEmail, otp, pendingRegistration.otpHash)
+    ) {
+      if (pendingRegistration) {
+        await RegistrationOtp.updateOne(
+          {
+            _id: pendingRegistration._id,
+            cleanupAt: { $gt: now },
+            otpExpiresAt: { $gt: now },
+            attempts: { $lt: registrationOtpMaxAttempts },
+          },
+          { $inc: { attempts: 1 } },
+        );
+      }
+      return response
+        .status(400)
+        .json({ message: "The verification code is invalid or expired. Request a new code and try again." });
+    }
+
+    const existingUser = await User.findOne({ email: normalizedEmail }).select("_id");
+    if (existingUser) {
+      await RegistrationOtp.deleteOne({ _id: pendingRegistration._id });
+      return response
+        .status(409)
+        .json({ message: "An account with this email already exists." });
+    }
+
+    const user = await User.create({
+      name: pendingRegistration.name,
+      email: pendingRegistration.email,
+      mobile: pendingRegistration.mobile,
+      address: pendingRegistration.address,
+      passwordHash: pendingRegistration.passwordHash,
+      emailVerifiedAt: new Date(),
+    });
+    await RegistrationOtp.deleteOne({ _id: pendingRegistration._id });
 
     setSessionCookie(response, user);
     response.status(201).json({ user: userResponse(user) });
@@ -113,6 +247,61 @@ async function register(request, response, next) {
         .status(400)
         .json({ message: "Check your account details and try again." });
     }
+    next(error);
+  }
+}
+
+async function resendRegistrationOtp(request, response, next) {
+  try {
+    const email =
+      typeof request.body?.email === "string"
+        ? request.body.email.trim().toLowerCase()
+        : "";
+    if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 254) {
+      return response
+        .status(400)
+        .json({ message: "Enter a valid email address." });
+    }
+    if (!process.env.SMTP_HOST || !process.env.SMTP_FROM) {
+      return response
+        .status(503)
+        .json({ message: "Email verification is not configured. Set SMTP_HOST and SMTP_FROM in server/.env, then restart the API." });
+    }
+
+    const pendingRegistration = await RegistrationOtp.findOne({
+      email,
+      cleanupAt: { $gt: new Date() },
+    });
+    if (!pendingRegistration) {
+      return response
+        .status(400)
+        .json({ message: "Registration expired. Please submit your details again." });
+    }
+    if (await User.exists({ email })) {
+      await RegistrationOtp.deleteOne({ _id: pendingRegistration._id });
+      return response
+        .status(409)
+        .json({ message: "An account with this email already exists." });
+    }
+
+    const otp = generateRegistrationOtp();
+    const now = Date.now();
+    pendingRegistration.otpHash = hashRegistrationOtp(email, otp);
+    pendingRegistration.otpExpiresAt = new Date(now + registrationOtpLifetimeMs);
+    pendingRegistration.cleanupAt = new Date(now + pendingRegistrationLifetimeMs);
+    pendingRegistration.attempts = 0;
+    await pendingRegistration.save();
+
+    if (!(await sendRegistrationOtp(email, otp))) {
+      return response
+        .status(503)
+        .json({ message: "Could not send the verification email. Check the SMTP host, sender address, and provider credentials in server/.env." });
+    }
+
+    response.json({
+      message: `A new verification code was sent to ${email}.`,
+    });
+  } catch (error) {
     next(error);
   }
 }
@@ -228,6 +417,108 @@ async function updateProfile(request, response, next) {
     if (!user)
       return response.status(404).json({ message: "Account not found." });
     response.json({ user: userResponse(user) });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function deleteAccount(request, response, next) {
+  try {
+    const { currentPassword } = request.body || {};
+    if (typeof currentPassword !== "string" || !currentPassword) {
+      return response
+        .status(400)
+        .json({ message: "Enter your current password to delete your account." });
+    }
+
+    const user = await User.findById(request.user.id).select("+passwordHash");
+    if (!user || user.deletedAt) {
+      return response.status(404).json({ message: "Account not found." });
+    }
+    if (user.role !== "citizen") {
+      return response
+        .status(403)
+        .json({ message: "Only resident accounts can be deleted here." });
+    }
+    if (!(await bcrypt.compare(currentPassword, user.passwordHash))) {
+      return response
+        .status(401)
+        .json({ message: "Your current password is incorrect." });
+    }
+
+    const complaints = await Complaint.find({ createdBy: user._id })
+      .select("_id imagePath")
+      .lean();
+    const complaintIds = complaints.map((complaint) => complaint._id);
+
+    for (const complaint of complaints) {
+      if (!complaint.imagePath) continue;
+      const imagePath = path.join(
+        __dirname,
+        "..",
+        "..",
+        "uploads",
+        path.basename(complaint.imagePath),
+      );
+      try {
+        await fs.promises.unlink(imagePath);
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+    }
+
+    await ComplaintHistory.deleteMany({ complaint: { $in: complaintIds } });
+    await ComplaintVote.deleteMany({
+      $or: [
+        { voter: user._id },
+        { complaint: { $in: complaintIds } },
+      ],
+    });
+    await Notification.deleteMany({
+      $or: [
+        { recipient: user._id },
+        { complaint: { $in: complaintIds } },
+      ],
+    });
+    await Complaint.deleteMany({ createdBy: user._id });
+    await ComplaintHistory.updateMany(
+      { actor: user._id },
+      { $set: { actor: null } },
+    );
+    await Complaint.updateMany(
+      { reviewedBy: user._id },
+      { $set: { reviewedBy: null } },
+    );
+    await Complaint.updateMany(
+      { deletedBy: user._id },
+      { $set: { deletedBy: null } },
+    );
+    await Complaint.updateMany(
+      { "statusHistory.updatedBy": user._id },
+      { $set: { "statusHistory.$[history].updatedBy": null } },
+      { arrayFilters: [{ "history.updatedBy": user._id }] },
+    );
+    await RegistrationOtp.deleteOne({ email: user.email });
+
+    const deletedUser = await User.findOneAndDelete({
+      _id: user._id,
+      role: "citizen",
+      deletedAt: null,
+      isSuspended: false,
+    }).select("_id");
+    if (!deletedUser) {
+      return response
+        .status(409)
+        .json({
+          message: "This account is no longer active. Some associated data may already have been removed.",
+        });
+    }
+
+    emitUserEvent(deletedUser._id, { type: "account-deleted" });
+    response.clearCookie("token", cookieOptions);
+    response.json({
+      message: "Your account and personal data were permanently deleted.",
+    });
   } catch (error) {
     next(error);
   }
@@ -408,10 +699,13 @@ module.exports = {
   adminLogin,
   getCurrentUser,
   changePassword,
+  deleteAccount,
   login,
   logout,
   register,
+  resendRegistrationOtp,
   requestPasswordReset,
   resetPassword,
+  verifyRegistrationEmail,
   updateProfile,
 };

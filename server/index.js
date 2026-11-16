@@ -22,6 +22,12 @@ if (
   );
 }
 
+if (!process.env.SMTP_HOST || !process.env.SMTP_FROM) {
+  console.warn(
+    "SMTP_HOST and SMTP_FROM are missing; email verification cannot send registration codes.",
+  );
+}
+
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error("PORT must be a valid TCP port between 1 and 65535.");
 }

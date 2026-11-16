@@ -17,11 +17,14 @@ jar. Never put the JWT or reset token in application logs.
 
 | Method | Path | Access | Purpose |
 | --- | --- | --- | --- |
-| POST | `/auth/register` | Public, rate limited | Create a citizen account |
+| POST | `/auth/register` | Public, rate limited | Start registration and email a verification code |
+| POST | `/auth/register/verify-email` | Public, rate limited | Verify the code and create the citizen account |
+| POST | `/auth/register/resend-code` | Public, rate limited | Send a replacement verification code |
 | POST | `/auth/login` | Public, rate limited | Start a citizen session |
 | POST | `/auth/logout` | Public | Clear the session cookie |
 | GET | `/auth/me` | Citizen/admin | Read the current profile |
 | PATCH | `/auth/me` | Citizen/admin | Update name, mobile number, and address |
+| DELETE | `/auth/me` | Citizen, current password required | Permanently delete own account and associated data |
 | PATCH | `/auth/me/password` | Citizen/admin | Change password and revoke other sessions |
 | POST | `/auth/forgot-password` | Public, rate limited | Send a one-time password reset link |
 | POST | `/auth/reset-password` | Public, rate limited | Reset with a valid 30-minute token |
@@ -30,6 +33,10 @@ Administrators use the separate `POST /admin/login` endpoint. It only creates a
 session for accounts with the database role `admin`; administrator logout is
 available through both `/admin/logout` and `/auth/logout`. Admin API routes
 require the current database role on every request.
+Deleting `/auth/me` permanently removes the account, its complaints and
+uploaded images, related complaint history, votes, and notifications. The
+resident's identity is removed from audit entries on other residents'
+complaints, and active sessions are signed out.
 
 Example registration request:
 
@@ -48,6 +55,33 @@ single use, expire after 30 minutes, and invalidate existing sessions when
 successfully used. Configure SMTP to deliver reset links; local development
 without SMTP returns a development-only reset URL and logs it to the API
 terminal. Production never returns the token in the API response.
+
+Registration is completed only after email verification. `/auth/register`
+accepts the registration request and returns `202 Accepted`; it does not create
+an account or session. Submit the email and six-digit `otp` to
+`/auth/register/verify-email` to create the account and start a session. Codes
+expire after 10 minutes, allow at most five guesses, and can be resent with the
+email address at `/auth/register/resend-code`. The code is stored as a keyed
+hash and is never returned in an API response. Registration cannot complete
+without SMTP configured to deliver the code to the email address, including
+during local development.
+
+Verification request:
+
+```json
+{
+  "email": "asha@example.com",
+  "otp": "123456"
+}
+```
+
+Resend request:
+
+```json
+{
+  "email": "asha@example.com"
+}
+```
 
 ## Complaints
 
@@ -167,10 +201,10 @@ with an indexed complaint reference, actor, action, values, and timestamp. The
 embedded status history remains a bounded recent summary for resident pages.
 Admin deletion archives complaints (`deletedAt`/`deletedBy`) rather than
 removing them; archived records are hidden from resident feeds and dashboard
-totals but remain available to admins. Citizen account deletion is likewise
-soft and preserves the account reference for complaint/audit history. User and
-admin identities share the `User` collection with role-based access, avoiding a
-second credentials store.
+totals but remain available to admins. Admin-initiated citizen account deletion
+remains a soft delete; self-service deletion permanently removes the account
+and its associated data as described above. User and admin identities share the
+`User` collection with role-based access, avoiding a second credentials store.
 
 ## Notifications and live updates
 

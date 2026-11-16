@@ -12,7 +12,11 @@ function streamEvents(request, response) {
 
   const topic = request.user.role === "admin" ? "admin" : `user:${request.user.id}`;
   const unsubscribe = subscribeToComplaintEvents(topic, (event) => {
-    const eventName = event.type === "account-suspended" ? "account.suspended" : "complaint.updated";
+    const eventName = event.type === "account-deleted"
+      ? "account.deleted"
+      : event.type === "account-suspended"
+        ? "account.suspended"
+        : "complaint.updated";
     response.write(`event: ${eventName}\ndata: ${JSON.stringify(event)}\n\n`);
   });
 

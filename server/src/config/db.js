@@ -3,6 +3,7 @@ const Complaint = require("../models/Complaint");
 const ComplaintHistory = require("../models/ComplaintHistory");
 const ComplaintVote = require("../models/ComplaintVote");
 const Notification = require("../models/Notification");
+const RegistrationOtp = require("../models/RegistrationOtp");
 const User = require("../models/User");
 
 async function connectDB() {
@@ -18,6 +19,7 @@ async function connectDB() {
     ComplaintHistory.createIndexes(),
     ComplaintVote.createIndexes(),
     Notification.createIndexes(),
+    RegistrationOtp.createIndexes(),
   ]);
   console.info(
     `MongoDB Atlas connected to database "${mongoose.connection.name}"`,

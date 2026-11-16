@@ -207,6 +207,7 @@ footer p { margin: 0; }
 .navbar, .nav-links, .listing-page, .complaint-card, .form-panel, .analytics-card { min-width: 0; }
 .btn { min-height: 44px; text-align: center; white-space: normal; }
 .complaint-card, .empty-state, .analytics-card { overflow-wrap: anywhere; }
+.complaint-print-root { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -281,4 +282,28 @@ footer p { margin: 0; }
   .form-panel { padding: 20px 14px; }
   .stats.resident-stats, .stats.admin-stats { grid-template-columns: minmax(0, 1fr); }
   .bar-chart-item small { font-size: .52rem; }
+}
+
+@page { margin: 16mm; }
+
+@media print {
+  body.printing-complaint > :not(.complaint-print-root) { display: none !important; }
+  body.printing-complaint > .complaint-print-root {
+    display: block !important;
+    color: #111827;
+    font-family: "Segoe UI", Arial, sans-serif;
+  }
+  .complaint-print-root .complaint-card {
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+  }
+  .complaint-print-root .no-print { display: none !important; }
+  .complaint-print-root .complaint-image {
+    max-width: 100%;
+    max-height: 90mm;
+    object-fit: contain;
+  }
+  .complaint-print-root .activity-history,
+  .complaint-print-root .admin-response { break-inside: avoid; }
 }

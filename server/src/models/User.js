@@ -33,6 +33,12 @@ const userSchema = new mongoose.Schema(
       required: true,
       select: false,
     },
+    emailVerifiedAt: {
+      type: Date,
+      required() {
+        return this.isNew && this.role === "citizen";
+      },
+    },
     role: {
       type: String,
       enum: ["citizen", "admin"],

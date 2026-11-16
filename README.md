@@ -106,9 +106,23 @@ review begins, browse other active community reports, and privately support an
 issue once. Similar same-location reports are flagged before submission, with a
 resident confirmation option for genuinely separate issues.
 
+Resident registration requires a six-digit email verification code before an
+account is created. Codes expire after 10 minutes and can be resent during the
+registration flow. Configure SMTP (`SMTP_HOST` and `SMTP_FROM`) in every
+environment; registration cannot continue if the verification email cannot be
+sent. Add your email provider's SMTP settings to `server/.env` and restart the
+API. If your provider requires an app password, use that instead of your normal
+email password.
+
+For Gmail, use `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`,
+`SMTP_SECURE=false`, your Gmail address for `SMTP_USER` and `SMTP_FROM`, and a
+Google App Password for `SMTP_PASSWORD`. Google requires 2-Step Verification
+before an App Password can be created. Keep the App Password only in the local,
+ignored `server/.env` file.
+
 Profile editing, single-use password reset links, citizen account suspension
-and soft deletion,
-resident/admin in-app notifications, optional SMTP status emails, and six-month
+and soft deletion (including password-confirmed self-deletion), resident/admin
+in-app notifications, optional SMTP status emails, and six-month
 complaint/category/user analytics are included. Configure `SMTP_HOST`,
 `SMTP_PORT`, `SMTP_FROM`, and any required `SMTP_USER`/`SMTP_PASSWORD` for email
 delivery. Reset tokens expire after 30 minutes. Without SMTP in development,

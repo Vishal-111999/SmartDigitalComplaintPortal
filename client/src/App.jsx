@@ -300,6 +300,31 @@ function ComplaintActivity({ history }) {
   );
 }
 
+function PrintComplaintButton() {
+  function printComplaint(event) {
+    const complaint = event.currentTarget.closest(".printable-complaint");
+    if (!complaint) return;
+
+    const printRoot = document.createElement("div");
+    printRoot.className = "complaint-print-root";
+    const printableComplaint = complaint.cloneNode(true);
+    printableComplaint.querySelectorAll(".no-print").forEach((element) => element.remove());
+    printableComplaint.querySelectorAll("details").forEach((element) => { element.open = true; });
+    printRoot.append(printableComplaint);
+    document.body.append(printRoot);
+    document.body.classList.add("printing-complaint");
+
+    const cleanup = () => {
+      printRoot.remove();
+      document.body.classList.remove("printing-complaint");
+    };
+    window.addEventListener("afterprint", cleanup, { once: true });
+    window.print();
+  }
+
+  return <button className="btn btn-secondary" type="button" onClick={printComplaint}>Print complaint</button>;
+}
+
 function AdminResponse({ complaint }) {
   const history = [...(complaint.statusHistory || [])].reverse();
   const historicalResponse = history.find((entry) => {
@@ -346,6 +371,9 @@ function AuthPage({ mode, onAuthenticated }) {
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [verificationRequired, setVerificationRequired] = useState(false);
+  const [verificationCode, setVerificationCode] = useState("");
+  const [verificationMessage, setVerificationMessage] = useState("");
 
   function updateField(event) {
     setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
@@ -357,16 +385,47 @@ function AuthPage({ mode, onAuthenticated }) {
     setError("");
     setBusy(true);
     try {
-      const path = isRegister ? "/auth/register" : "/auth/login";
-      const payload = isRegister
-        ? form
-        : { email: form.email, password: form.password };
-      const { user } = await apiRequest(path, {
+      if (isRegister && verificationRequired) {
+        const { user } = await apiRequest("/auth/register/verify-email", {
+          method: "POST",
+          body: JSON.stringify({ email: form.email, otp: verificationCode }),
+        });
+        onAuthenticated(user);
+        navigate("/");
+      } else if (isRegister) {
+        const result = await apiRequest("/auth/register", {
+          method: "POST",
+          body: JSON.stringify(form),
+        });
+        setVerificationRequired(true);
+        setVerificationCode("");
+        setVerificationMessage(result.message);
+        setForm((current) => ({ ...current, password: "" }));
+      } else {
+        const { user } = await apiRequest("/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ email: form.email, password: form.password }),
+        });
+        onAuthenticated(user);
+        navigate("/");
+      }
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resendVerificationCode() {
+    setError("");
+    setBusy(true);
+    try {
+      const result = await apiRequest("/auth/register/resend-code", {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ email: form.email }),
       });
-      onAuthenticated(user);
-      navigate("/");
+      setVerificationCode("");
+      setVerificationMessage(result.message);
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -377,34 +436,76 @@ function AuthPage({ mode, onAuthenticated }) {
   return (
     <main className="auth-page">
       <section className="form-panel">
-        <p className="eyebrow">{isRegister ? "Join the community" : "Welcome back"}</p>
-        <h1>{isRegister ? "Create your account" : "Login"}</h1>
+        <p className="eyebrow">{isRegister ? verificationRequired ? "Verify your email" : "Join the community" : "Welcome back"}</p>
+        <h1>{isRegister ? verificationRequired ? "Check your inbox" : "Create your account" : "Login"}</h1>
         <p className="form-intro">
           {isRegister
-            ? "Create an account to submit and track local complaints."
+            ? verificationRequired
+              ? "Enter the six-digit code sent to your email to finish creating your account."
+              : "Create an account to submit and track local complaints. We’ll email a code to verify your address."
             : "Sign in to manage and follow your complaints."}
         </p>
         <form onSubmit={submit}>
-          {isRegister && (
+          {isRegister && !verificationRequired && (
             <>
               <Field label="Full name" name="name" value={form.name} onChange={updateField} required maxLength={100} />
               <Field label="Mobile number" name="mobile" type="tel" value={form.mobile} onChange={updateField} required pattern="[0-9]{10}" maxLength={10} hint="Enter 10 digits." />
               <Field label="Address (optional)" name="address" value={form.address} onChange={updateField} maxLength={500} />
             </>
           )}
-          <Field label="Email address" name="email" type="email" value={form.email} onChange={updateField} required maxLength={254} />
-          <Field label="Password" name="password" type="password" value={form.password} onChange={updateField} autoComplete={isRegister ? "new-password" : "current-password"} required minLength={8} maxLength={72} hint={isRegister ? "Use at least 8 characters." : undefined} />
+          <Field label="Email address" name="email" type="email" value={form.email} onChange={updateField} required maxLength={254} disabled={verificationRequired} />
+          {verificationRequired ? (
+            <Field
+              label="Six-digit verification code"
+              name="verification-code"
+              type="text"
+              inputMode="numeric"
+              value={verificationCode}
+              onChange={(event) => {
+                setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6));
+                setError("");
+              }}
+              required
+              pattern="[0-9]{6}"
+              maxLength={6}
+              autoComplete="one-time-code"
+            />
+          ) : (
+            <Field label="Password" name="password" type="password" value={form.password} onChange={updateField} autoComplete={isRegister ? "new-password" : "current-password"} required minLength={8} maxLength={72} hint={isRegister ? "Use at least 8 characters." : undefined} />
+          )}
+          {verificationMessage && <p className="message success" role="status">{verificationMessage}</p>}
           {error && <p className="message error" role="alert">{error}</p>}
           <button className="btn btn-primary submit-button" type="submit" disabled={busy}>
-            {busy ? "Please wait..." : isRegister ? "Create account" : "Login"}
+            {busy ? "Please wait..." : isRegister ? verificationRequired ? "Verify email and create account" : "Send verification code" : "Login"}
           </button>
         </form>
-        <p className="form-footer">
-          {isRegister ? "Already registered? " : "New here? "}
-          <Link to={isRegister ? "/login" : "/register"}>
-            {isRegister ? "Login" : "Create an account"}
-          </Link>
-        </p>
+        {isRegister && verificationRequired ? (
+          <div className="admin-actions complaint-toolbar">
+            <button className="btn btn-secondary" type="button" onClick={resendVerificationCode} disabled={busy}>
+              Resend code
+            </button>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={() => {
+                setVerificationRequired(false);
+                setVerificationCode("");
+                setVerificationMessage("");
+                setError("");
+              }}
+              disabled={busy}
+            >
+              Change registration details
+            </button>
+          </div>
+        ) : (
+          <p className="form-footer">
+            {isRegister ? "Already registered? " : "New here? "}
+            <Link to={isRegister ? "/login" : "/register"}>
+              {isRegister ? "Login" : "Create an account"}
+            </Link>
+          </p>
+        )}
         {!isRegister && <p className="form-footer"><Link to="/forgot-password">Forgot your password?</Link></p>}
       </section>
     </main>
@@ -521,6 +622,7 @@ function PasswordResetPage({ reset = false }) {
 }
 
 function ProfilePage({ user, onUserUpdated }) {
+  const navigate = useNavigate();
   const [form, setForm] = useState({
     name: user.name || "",
     mobile: user.mobile || "",
@@ -534,6 +636,9 @@ function ProfilePage({ user, onUserUpdated }) {
   const [passwordError, setPasswordError] = useState("");
   const [passwordNotice, setPasswordNotice] = useState("");
   const [passwordBusy, setPasswordBusy] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   async function submit(event) {
     event.preventDefault();
@@ -574,6 +679,25 @@ function ProfilePage({ user, onUserUpdated }) {
     }
   }
 
+  async function deleteAccount(event) {
+    event.preventDefault();
+    if (!window.confirm("Permanently delete your account and all your complaints, votes, and notifications? This cannot be undone.")) return;
+    setDeleteBusy(true);
+    setDeleteError("");
+    try {
+      await apiRequest("/auth/me", {
+        method: "DELETE",
+        body: JSON.stringify({ currentPassword: deletePassword }),
+      });
+      onUserUpdated(null);
+      navigate("/login", { replace: true });
+    } catch (requestError) {
+      setDeleteError(requestError.message);
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   return (
     <main className="auth-page">
       <section className="form-panel">
@@ -597,12 +721,33 @@ function ProfilePage({ user, onUserUpdated }) {
           {passwordNotice && <p className="message success" role="status">{passwordNotice}</p>}
           <button className="btn btn-secondary submit-button" type="submit" disabled={passwordBusy}>{passwordBusy ? "Updating..." : "Change password"}</button>
         </form>
+        <hr className="profile-divider" />
+        <h2>Delete account</h2>
+        <p className="form-intro">This permanently deletes your resident account, complaints, votes, notifications, and uploaded complaint images. Your identity is removed from audit records on other residents’ complaints. This cannot be undone.</p>
+        <form onSubmit={deleteAccount}>
+          <Field
+            label="Current password"
+            name="delete-account-password"
+            type="password"
+            value={deletePassword}
+            onChange={(event) => {
+              setDeletePassword(event.target.value);
+              setDeleteError("");
+            }}
+            required
+            autoComplete="current-password"
+          />
+          {deleteError && <p className="message error" role="alert">{deleteError}</p>}
+          <button className="btn btn-danger submit-button" type="submit" disabled={deleteBusy}>
+            {deleteBusy ? "Deleting account..." : "Delete my account"}
+          </button>
+        </form>
       </section>
     </main>
   );
 }
 
-function Field({ label, name, type = "text", value, onChange, required, pattern, minLength, maxLength, hint, autoComplete = name }) {
+function Field({ label, name, type = "text", value, onChange, required, pattern, minLength, maxLength, hint, inputMode, disabled, autoComplete = name }) {
   return (
     <div className="field">
       <label htmlFor={name}>{label}</label>
@@ -610,13 +755,14 @@ function Field({ label, name, type = "text", value, onChange, required, pattern,
         id={name}
         name={name}
         type={type}
-        inputMode={name === "mobile" ? "numeric" : undefined}
+        inputMode={inputMode || (name === "mobile" ? "numeric" : undefined)}
         value={value}
         onChange={onChange}
         required={required}
         pattern={pattern}
         minLength={minLength}
         maxLength={maxLength}
+        disabled={disabled}
         autoComplete={autoComplete || ({ mobile: "tel", address: "street-address" })[name] || name}
       />
       {hint && <small>{hint}</small>}
@@ -1096,7 +1242,7 @@ function MyComplaintsPage() {
       )}
       <div className="complaint-list">
         {complaints.map((complaint) => (
-          <article className="complaint-card" key={complaint._id}>
+          <article className="complaint-card printable-complaint" key={complaint._id}>
             <div className="complaint-heading">
               <div><span className="category-label">{complaint.category}</span><h2>{complaint.title}</h2></div>
               <span className={`status status-${complaint.status.toLowerCase().replaceAll(" ", "-")}`}>
@@ -1114,8 +1260,11 @@ function MyComplaintsPage() {
                   .format(new Date(complaint.createdAt))}
               </time>
             </div>
+            <div className="admin-actions complaint-card-actions no-print">
+              <PrintComplaintButton />
+            </div>
             {(complaint.status === "Pending" || complaint.status === "Submitted") && !complaint.reviewedAt && (
-              <div className="admin-actions resident-complaint-actions">
+              <div className="admin-actions resident-complaint-actions no-print">
                 <Link className="btn btn-secondary" to={`/complaint/${complaint._id}/edit`}>Edit complaint</Link>
                 <button
                   className="btn btn-danger"
@@ -1679,10 +1828,13 @@ function AdminComplaintDetailsPage() {
       {error && <p className="message error" role="alert">{error}</p>}
       {notice && <p className="message success" role="status">{notice}</p>}
       <section className="admin-detail-grid">
-        <article className="complaint-card">
+        <article className="complaint-card printable-complaint">
           <div className="complaint-heading">
             <div><span className="category-label">{complaint.category}</span><h2>Report details</h2></div>
             <span className={`status status-${complaint.status.toLowerCase().replaceAll(" ", "-")}`}>{complaint.status}</span>
+          </div>
+          <div className="admin-actions complaint-card-actions no-print">
+            <PrintComplaintButton />
           </div>
           <p>{complaint.description}</p>
           <div className="complaint-meta">
@@ -2010,6 +2162,11 @@ function AppContent() {
       setUser(null);
       setApiError("This account has been suspended. Contact the portal administrator for assistance.");
       window.dispatchEvent(new Event("account:suspended"));
+    });
+    eventSource.addEventListener("account.deleted", () => {
+      setUser(null);
+      setApiError("This account has been deleted.");
+      window.dispatchEvent(new Event("account:deleted"));
     });
 
     return () => eventSource.close();
